@@ -9,7 +9,7 @@ from openai import OpenAI
 # ============================================================
 # RAG-Based Chatbot for PDC CCP
 # Topic: Parallel and Distributed Computing
-# Ready for Streamlit Deployment
+# Streamlit + OpenAI LLM Version
 # Main file name: pdc.py
 # ============================================================
 
@@ -31,7 +31,7 @@ def clean_text(text):
 
 # -----------------------------
 # Default Knowledge Base
-# This is used if no .txt documents are uploaded/found.
+# Used if no documents folder or .txt files exist.
 # -----------------------------
 DEFAULT_DOCUMENTS = [
     {
@@ -67,8 +67,8 @@ DEFAULT_DOCUMENTS = [
         "content": """
         RAG stands for Retrieval-Augmented Generation. A RAG chatbot first retrieves relevant information from
         a knowledge base and then generates an answer using that information. In this project, the chatbot
-        retrieves the most relevant document chunks based on the user's question and creates an answer from
-        those retrieved chunks.
+        retrieves the most relevant document chunks based on the user's question and sends those chunks to an
+        LLM to create a better answer.
         """
     },
     {
@@ -123,7 +123,7 @@ DEFAULT_DOCUMENTS = [
 
 
 # -----------------------------
-# Load Documents from Folder
+# Load Documents
 # -----------------------------
 def load_documents(folder_path="documents"):
     documents = []
@@ -132,14 +132,17 @@ def load_documents(folder_path="documents"):
         for filename in os.listdir(folder_path):
             if filename.lower().endswith(".txt"):
                 file_path = os.path.join(folder_path, filename)
+
                 try:
                     with open(file_path, "r", encoding="utf-8") as file:
                         content = file.read()
+
                     if content.strip():
                         documents.append({
                             "title": filename,
                             "content": content
                         })
+
                 except Exception:
                     pass
 
@@ -150,7 +153,7 @@ def load_documents(folder_path="documents"):
 
 
 # -----------------------------
-# Split Documents into Chunks
+# Chunk Documents
 # -----------------------------
 def chunk_text(text, chunk_size=90):
     words = text.split()
@@ -158,6 +161,7 @@ def chunk_text(text, chunk_size=90):
 
     for i in range(0, len(words), chunk_size):
         chunk = " ".join(words[i:i + chunk_size])
+
         if chunk.strip():
             chunks.append(chunk)
 
@@ -169,6 +173,7 @@ def process_single_document(document):
     chunks = chunk_text(clean_content)
 
     processed_chunks = []
+
     for chunk in chunks:
         processed_chunks.append({
             "title": document["title"],
@@ -232,6 +237,7 @@ def retrieve_chunks(question, chunks, top_k=3):
     for item in chunks:
         chunk_vector = text_to_vector(item["chunk"])
         score = cosine_similarity(question_vector, chunk_vector)
+
         scored_chunks.append({
             "title": item["title"],
             "chunk": item["chunk"],
@@ -243,18 +249,22 @@ def retrieve_chunks(question, chunks, top_k=3):
 
 
 # -----------------------------
-# Generate Answer
+# Generate Answer with OpenAI LLM
 # -----------------------------
- def generate_answer(question, retrieved_chunks):
+def generate_answer(question, retrieved_chunks):
     useful_chunks = [item for item in retrieved_chunks if item["score"] > 0]
 
     if not useful_chunks:
         return (
             "I could not find a strong match in the knowledge base. "
-            "Please ask about parallel computing, distributed computing, RAG, chunking, vectors, or similarity-based retrieval."
+            "Please ask about parallel computing, distributed computing, RAG, "
+            "chunking, vectors, or similarity-based retrieval."
         )
 
-    context = "\n\n".join(item["chunk"] for item in useful_chunks)
+    context = "\n\n".join(
+        f"Source: {item['title']}\nText: {item['chunk']}"
+        for item in useful_chunks
+    )
 
     try:
         client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -264,19 +274,35 @@ def retrieve_chunks(question, chunks, top_k=3):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful academic chatbot for Parallel and Distributed Computing. Answer only using the provided context."
+                    "content": (
+                        "You are a helpful academic chatbot for a Parallel and Distributed Computing project. "
+                        "Answer in simple student-friendly language. Use only the provided context. "
+                        "If the answer is not in the context, say that the knowledge base does not contain enough information."
+                    )
                 },
                 {
                     "role": "user",
-                    "content": f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer in simple student-friendly language."
+                    "content": (
+                        f"Context:\n{context}\n\n"
+                        f"Question:\n{question}\n\n"
+                        "Now give a clear answer."
+                    )
                 }
-            ]
+            ],
+            temperature=0.3
         )
 
         return response.choices[0].message.content
 
+    except KeyError:
+        return (
+            "OpenAI API key is missing. Please add it in Streamlit Secrets like this:\n\n"
+            'OPENAI_API_KEY = "your_api_key_here"'
+        )
+
     except Exception as e:
         return f"OpenAI error: {e}"
+
 
 # -----------------------------
 # Streamlit User Interface
@@ -285,21 +311,22 @@ st.title("🤖 RAG-Based Chatbot for PDC CCP")
 st.write("### Topic: Parallel and Distributed Computing")
 st.write(
     "This chatbot uses document chunking, vector generation, cosine similarity, "
-    "and retrieval-based answering to respond to questions."
+    "retrieval-based search, and OpenAI LLM answer generation."
 )
 
 with st.sidebar:
     st.header("📌 Project Info")
     st.write("**Project:** RAG-Based Chatbot")
     st.write("**Subject:** Parallel and Distributed Computing")
+    st.write("**LLM:** OpenAI")
     st.write("**Concepts Used:**")
     st.write("1. Parallel document processing")
     st.write("2. Document chunking")
     st.write("3. Vector generation")
     st.write("4. Similarity-based retrieval")
-    st.write("5. Question answering")
+    st.write("5. OpenAI answer generation")
 
-    st.header("📁 Optional")
+    st.header("📁 Optional Documents")
     st.write(
         "To use your own data, create a folder named `documents` in GitHub "
         "and add `.txt` files inside it."
@@ -327,7 +354,9 @@ with col1:
 
             st.subheader("🔍 Retrieved Chunks")
             for index, item in enumerate(retrieved, start=1):
-                with st.expander(f"Chunk {index} | Source: {item['title']} | Score: {item['score']:.3f}"):
+                with st.expander(
+                    f"Chunk {index} | Source: {item['title']} | Score: {item['score']:.3f}"
+                ):
                     st.write(item["chunk"])
 
 with col2:
@@ -344,4 +373,4 @@ with col2:
     st.write("- Difference between parallel and distributed computing?")
 
 st.markdown("---")
-st.write("Made with Streamlit for PDC CCP Project 🚀")
+st.write("Made with Streamlit + OpenAI for PDC CCP Project 🚀")
