@@ -1,2 +1,1 @@
-# No external packages required. Project uses Python standard library only.
-# Recommended Python version: 3.9+
+streamlit
