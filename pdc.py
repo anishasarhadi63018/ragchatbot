@@ -4,6 +4,7 @@ import math
 import collections
 import concurrent.futures
 import streamlit as st
+from openai import OpenAI
 
 # ============================================================
 # RAG-Based Chatbot for PDC CCP
@@ -244,7 +245,7 @@ def retrieve_chunks(question, chunks, top_k=3):
 # -----------------------------
 # Generate Answer
 # -----------------------------
-def generate_answer(question, retrieved_chunks):
+ def generate_answer(question, retrieved_chunks):
     useful_chunks = [item for item in retrieved_chunks if item["score"] > 0]
 
     if not useful_chunks:
@@ -253,18 +254,29 @@ def generate_answer(question, retrieved_chunks):
             "Please ask about parallel computing, distributed computing, RAG, chunking, vectors, or similarity-based retrieval."
         )
 
-    context = " ".join(item["chunk"] for item in useful_chunks)
+    context = "\n\n".join(item["chunk"] for item in useful_chunks)
 
-    answer = f"""
-Based on the retrieved knowledge, the answer is:
+    try:
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-{context}
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful academic chatbot for Parallel and Distributed Computing. Answer only using the provided context."
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer in simple student-friendly language."
+                }
+            ]
+        )
 
-In simple words, this means the system searches the stored knowledge, finds the most relevant information,
-and uses it to answer your question.
-"""
-    return answer.strip()
+        return response.choices[0].message.content
 
+    except Exception as e:
+        return f"OpenAI error: {e}"
 
 # -----------------------------
 # Streamlit User Interface
